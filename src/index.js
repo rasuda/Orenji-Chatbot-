@@ -11,6 +11,15 @@ export default {
       return Response.json({ ok: true, service: env.BOT_NAME || "Orenji AI" });
     }
 
+    if (request.method === "GET" && url.pathname === "/status") {
+      return Response.json({
+        ok: true,
+        telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN),
+        geminiConfigured: Boolean(env.GEMINI_API_KEY),
+        webhookSecretConfigured: Boolean(env.WEBHOOK_SECRET)
+      });
+    }
+
     if (request.method === "GET" && url.pathname === "/setup") {
       return setupPage();
     }
