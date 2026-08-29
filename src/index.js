@@ -11,6 +11,14 @@ export default {
       return Response.json({ ok: true, service: env.BOT_NAME || "Orenji AI" });
     }
 
+    if (request.method === "GET" && url.pathname === "/setup") {
+      return setupPage();
+    }
+
+    if (request.method === "POST" && url.pathname === "/setup-webhook") {
+      return setupWebhook(request, env);
+    }
+
     if (request.method !== "POST" || url.pathname !== "/webhook") {
       return new Response("Not found", { status: 404 });
     }
@@ -34,6 +42,65 @@ export default {
     return Response.json({ ok: true });
   }
 };
+
+function setupPage(message = "") {
+  const status = message ? `<p class="status">${escapeHtml(message)}</p>` : "";
+  return new Response(`<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Configurar Orenji AI</title>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#fff7ed;color:#292524;margin:0;padding:24px}
+    main{max-width:480px;margin:8vh auto;background:white;padding:28px;border-radius:18px;box-shadow:0 12px 35px #9a341222}
+    h1{color:#c2410c;margin-top:0}label{display:block;font-weight:600;margin:20px 0 8px}
+    input,button{box-sizing:border-box;width:100%;padding:14px;border-radius:10px;font-size:16px}
+    input{border:1px solid #d6d3d1}button{margin-top:16px;border:0;background:#ea580c;color:white;font-weight:700}
+    small{display:block;color:#78716c;margin-top:10px}.status{background:#fef3c7;padding:12px;border-radius:10px}
+  </style>
+</head>
+<body><main>
+  <h1>Orenji AI</h1>
+  <p>Conecte o bot do Telegram a este Worker.</p>
+  ${status}
+  <form method="post" action="/setup-webhook">
+    <label for="secret">Webhook secret</label>
+    <input id="secret" name="secret" type="password" required autocomplete="off">
+    <button type="submit">Conectar Telegram</button>
+  </form>
+  <small>O valor é enviado somente a este Worker para validar a configuração.</small>
+</main></body></html>`, { headers: { "Content-Type": "text/html; charset=UTF-8" } });
+}
+
+async function setupWebhook(request, env) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.WEBHOOK_SECRET) {
+    return setupPage("Cadastre TELEGRAM_BOT_TOKEN e WEBHOOK_SECRET no Cloudflare antes de continuar.");
+  }
+
+  const form = await request.formData();
+  if (form.get("secret") !== env.WEBHOOK_SECRET) {
+    return new Response("Webhook secret incorreto.", { status: 401 });
+  }
+
+  const origin = new URL(request.url).origin;
+  await telegramRequest(env, "setWebhook", {
+    url: `${origin}/webhook`,
+    secret_token: env.WEBHOOK_SECRET,
+    drop_pending_updates: true
+  });
+
+  return setupPage("Telegram conectado. Agora abra o bot e envie /start.");
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
 
 function isValidWebhook(request, env) {
   if (!env.WEBHOOK_SECRET) return true;
