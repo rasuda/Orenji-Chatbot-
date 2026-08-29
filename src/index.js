@@ -187,7 +187,7 @@ async function handleUpdate(update, env) {
 async function askGemini(env, history, text) {
   if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY não configurada");
 
-  const model = env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+  const model = env.GEMINI_MODEL || "gemini-3.1-flash-lite";
   const response = await fetch(`${GEMINI_API}/${model}:generateContent`, {
     method: "POST",
     headers: {
@@ -202,7 +202,6 @@ async function askGemini(env, history, text) {
       },
       contents: [...history, { role: "user", parts: [{ text }] }],
       generationConfig: {
-        temperature: 0.7,
         maxOutputTokens: 1200
       }
     })
