@@ -188,6 +188,11 @@ async function askGemini(env, history, text) {
   if (!env.GEMINI_API_KEY) throw new Error("GEMINI_API_KEY não configurada");
 
   const model = env.GEMINI_MODEL || "gemini-3.1-flash-lite";
+  const currentDateTime = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    dateStyle: "full",
+    timeStyle: "short"
+  }).format(new Date());
   const response = await fetch(`${GEMINI_API}/${model}:generateContent`, {
     method: "POST",
     headers: {
@@ -197,7 +202,13 @@ async function askGemini(env, history, text) {
     body: JSON.stringify({
       systemInstruction: {
         parts: [{
-          text: "Você é o Orenji AI, um assistente útil, claro e objetivo. Responda em português do Brasil, salvo se o usuário pedir outro idioma. Não invente fatos; quando não souber, diga isso."
+          text: `Você é o Orenji AI, um assistente útil, claro e objetivo.
+Responda em português do Brasil, salvo se o usuário pedir outro idioma.
+A data e hora atuais no horário de Brasília são: ${currentDateTime}.
+Use essa informação quando perguntarem data ou horário.
+Você não possui acesso automático à internet, previsão do tempo ou dados em tempo real. Nunca invente temperatura, clima, notícias ou outros dados atuais; explique a limitação quando necessário.
+Não invente fatos; quando não souber, diga isso.
+Responda em texto simples, sem Markdown, asteriscos, títulos ou tabelas.`
         }]
       },
       contents: [...history, { role: "user", parts: [{ text }] }],
