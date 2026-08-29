@@ -1,0 +1,12 @@
+name = "orenji-chatbot"
+main = "src/index.js"
+compatibility_date = "2026-08-29"
+
+# Para ativar memoria entre mensagens, crie um namespace KV e descomente:
+# [[kv_namespaces]]
+# binding = "CHAT_HISTORY"
+# id = "COLE_AQUI_O_ID_DO_KV"
+
+[vars]
+GEMINI_MODEL = "gemini-2.5-flash-lite"
+BOT_NAME = "Orenji AI"
