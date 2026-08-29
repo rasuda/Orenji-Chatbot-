@@ -99,7 +99,23 @@ async function setupWebhook(request, env) {
     drop_pending_updates: true
   });
 
-  return setupPage("Telegram conectado. Agora abra o bot e envie /start.");
+  try {
+    await askGemini(env, [], "Responda somente com a palavra OK.");
+  } catch (error) {
+    return setupPage(`Telegram conectado, mas o Gemini falhou: ${geminiDiagnostic(error)}`);
+  }
+
+  return setupPage("Telegram e Gemini conectados. Agora abra o bot e envie /start.");
+}
+
+function geminiDiagnostic(error) {
+  const message = String(error?.message || error);
+  if (message.includes(" 400:")) return "requisição rejeitada. Verifique o modelo configurado.";
+  if (message.includes(" 401:")) return "chave de API inválida.";
+  if (message.includes(" 403:")) return "chave sem permissão ou Gemini API não habilitada no projeto.";
+  if (message.includes(" 404:")) return "modelo indisponível para esta chave/projeto.";
+  if (message.includes(" 429:")) return "limite gratuito ou cota da API excedida.";
+  return "erro inesperado ao acessar a API.";
 }
 
 function escapeHtml(value) {
