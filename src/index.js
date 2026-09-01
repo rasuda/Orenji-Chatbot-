@@ -1,5 +1,6 @@
 const TELEGRAM_API = "https://api.telegram.org";
 const GEMINI_API = "https://generativelanguage.googleapis.com/v1beta/models";
+const META_GRAPH_API = "https://graph.facebook.com";
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_HISTORY_ITEMS = 10;
 
@@ -16,7 +17,14 @@ export default {
         ok: true,
         telegramConfigured: Boolean(env.TELEGRAM_BOT_TOKEN),
         geminiConfigured: Boolean(env.GEMINI_API_KEY),
-        webhookSecretConfigured: Boolean(env.WEBHOOK_SECRET)
+        webhookSecretConfigured: Boolean(env.WEBHOOK_SECRET),
+        whatsappConfigured: Boolean(
+          env.WHATSAPP_ACCESS_TOKEN &&
+          env.WHATSAPP_PHONE_NUMBER_ID &&
+          env.WHATSAPP_VERIFY_TOKEN &&
+          env.WHATSAPP_APP_SECRET
+        ),
+        geminiModel: env.GEMINI_MODEL || "gemini-3.1-flash-lite"
       });
     }
 
@@ -26,6 +34,14 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/setup-webhook") {
       return setupWebhook(request, env);
+    }
+
+    if (url.pathname === "/webhook/whatsapp" && request.method === "GET") {
+      return verifyWhatsAppWebhook(url, env);
+    }
+
+    if (url.pathname === "/webhook/whatsapp" && request.method === "POST") {
+      return receiveWhatsAppWebhook(request, env, ctx);
     }
 
     if (request.method !== "POST" || url.pathname !== "/webhook") {
@@ -132,6 +148,166 @@ function isValidWebhook(request, env) {
   return request.headers.get("X-Telegram-Bot-Api-Secret-Token") === env.WEBHOOK_SECRET;
 }
 
+function verifyWhatsAppWebhook(url, env) {
+  const mode = url.searchParams.get("hub.mode");
+  const token = url.searchParams.get("hub.verify_token");
+  const challenge = url.searchParams.get("hub.challenge");
+
+  if (mode === "subscribe" && token && token === env.WHATSAPP_VERIFY_TOKEN) {
+    return new Response(challenge || "", {
+      status: 200,
+      headers: { "Content-Type": "text/plain; charset=UTF-8" }
+    });
+  }
+
+  return new Response("Forbidden", { status: 403 });
+}
+
+async function receiveWhatsAppWebhook(request, env, ctx) {
+  if (!isWhatsAppConfigured(env)) {
+    return new Response("WhatsApp not configured", { status: 503 });
+  }
+
+  const rawBody = await request.text();
+  if (!(await isValidMetaSignature(rawBody, request.headers, env.WHATSAPP_APP_SECRET))) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  let update;
+  try {
+    update = JSON.parse(rawBody);
+  } catch {
+    return new Response("Invalid JSON", { status: 400 });
+  }
+
+  if (update.object !== "whatsapp_business_account") {
+    return new Response("Not found", { status: 404 });
+  }
+
+  const task = handleWhatsAppUpdate(update, env).catch((error) =>
+    console.error("Erro ao processar mensagem do WhatsApp", error)
+  );
+  ctx.waitUntil(task);
+  return Response.json({ ok: true });
+}
+
+function isWhatsAppConfigured(env) {
+  return Boolean(
+    env.WHATSAPP_ACCESS_TOKEN &&
+    env.WHATSAPP_PHONE_NUMBER_ID &&
+    env.WHATSAPP_VERIFY_TOKEN &&
+    env.WHATSAPP_APP_SECRET
+  );
+}
+
+async function isValidMetaSignature(rawBody, headers, appSecret) {
+  const signatureHeader = headers.get("X-Hub-Signature-256") || "";
+  if (!appSecret || !signatureHeader.startsWith("sha256=")) return false;
+
+  const signature = hexToBytes(signatureHeader.slice(7));
+  if (!signature) return false;
+
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(appSecret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  );
+  return crypto.subtle.verify("HMAC", key, signature, encoder.encode(rawBody));
+}
+
+function hexToBytes(hex) {
+  if (!/^[0-9a-f]{64}$/i.test(hex)) return null;
+  return Uint8Array.from(hex.match(/.{2}/g), (byte) => Number.parseInt(byte, 16));
+}
+
+function extractWhatsAppMessages(update) {
+  const messages = [];
+  for (const entry of update.entry || []) {
+    for (const change of entry.changes || []) {
+      const value = change.value || {};
+      const contacts = new Map(
+        (value.contacts || []).map((contact) => [contact.wa_id, contact.profile?.name || ""])
+      );
+      for (const message of value.messages || []) {
+        messages.push({
+          id: message.id,
+          from: message.from,
+          name: contacts.get(message.from) || "",
+          type: message.type,
+          text: message.text?.body || ""
+        });
+      }
+    }
+  }
+  return messages;
+}
+
+async function handleWhatsAppUpdate(update, env) {
+  for (const message of extractWhatsAppMessages(update)) {
+    if (!message.id || !message.from || await isDuplicateWhatsAppMessage(env, message.id)) continue;
+
+    if (message.type !== "text") {
+      await sendWhatsAppMessage(env, message.from,
+        "No momento, consigo responder apenas mensagens de texto."
+      );
+      continue;
+    }
+
+    const text = message.text.trim();
+    if (!text) continue;
+    const command = text.toLocaleLowerCase("pt-BR");
+
+    if (["/start", "start", "iniciar"].includes(command)) {
+      await sendWhatsAppMessage(env, message.from,
+        `Olá${message.name ? `, ${message.name}` : ""}! Eu sou o ${env.BOT_NAME || "Orenji AI"}. Envie uma pergunta e eu responderei usando o Gemini.`
+      );
+      continue;
+    }
+
+    if (["/ajuda", "ajuda", "/help"].includes(command)) {
+      await sendWhatsAppMessage(env, message.from,
+        "Envie uma pergunta para conversar com o Orenji AI. Digite limpar para apagar o histórico."
+      );
+      continue;
+    }
+
+    const conversationId = `whatsapp:${message.from}`;
+    if (["/limpar", "limpar"].includes(command)) {
+      if (env.CHAT_HISTORY) await env.CHAT_HISTORY.delete(conversationId);
+      await sendWhatsAppMessage(env, message.from, "Histórico apagado. Podemos começar novamente.");
+      continue;
+    }
+
+    if (text.length > MAX_MESSAGE_LENGTH) {
+      await sendWhatsAppMessage(env, message.from,
+        `A mensagem deve ter no máximo ${MAX_MESSAGE_LENGTH} caracteres.`
+      );
+      continue;
+    }
+
+    try {
+      const answer = await generateReply(env, conversationId, text);
+      await sendLongWhatsAppMessage(env, message.from, answer);
+    } catch (error) {
+      console.error("Erro no Gemini para WhatsApp", error);
+      await sendWhatsAppMessage(env, message.from,
+        "Não consegui responder agora. Tente novamente em alguns instantes."
+      );
+    }
+  }
+}
+
+async function isDuplicateWhatsAppMessage(env, messageId) {
+  if (!env.CHAT_HISTORY) return false;
+  const key = `whatsapp-message:${messageId}`;
+  if (await env.CHAT_HISTORY.get(key)) return true;
+  await env.CHAT_HISTORY.put(key, "1", { expirationTtl: 60 * 60 * 24 });
+  return false;
+}
+
 async function handleUpdate(update, env) {
   const message = update.message;
   if (!message?.chat?.id || typeof message.text !== "string") return;
@@ -157,7 +333,7 @@ async function handleUpdate(update, env) {
   }
 
   if (text === "/limpar") {
-    if (env.CHAT_HISTORY) await env.CHAT_HISTORY.delete(chatId);
+    if (env.CHAT_HISTORY) await env.CHAT_HISTORY.delete(`telegram:${chatId}`);
     await sendTelegramMessage(env, chatId, "Histórico apagado. Podemos começar novamente.");
     return;
   }
@@ -170,18 +346,24 @@ async function handleUpdate(update, env) {
   await sendChatAction(env, chatId, "typing");
 
   try {
-    const history = await loadHistory(env, chatId);
-    const answer = await askGemini(env, history, text);
+    const conversationId = `telegram:${chatId}`;
+    const answer = await generateReply(env, conversationId, text);
     await sendLongMessage(env, chatId, answer);
-    await saveHistory(env, chatId, [
-      ...history,
-      { role: "user", parts: [{ text }] },
-      { role: "model", parts: [{ text: answer }] }
-    ]);
   } catch (error) {
     console.error("Erro no Gemini", error);
     await sendTelegramMessage(env, chatId, "Não consegui responder agora. Tente novamente em alguns instantes.");
   }
+}
+
+async function generateReply(env, conversationId, text) {
+  const history = await loadHistory(env, conversationId);
+  const answer = await askGemini(env, history, text);
+  await saveHistory(env, conversationId, [
+    ...history,
+    { role: "user", parts: [{ text }] },
+    { role: "model", parts: [{ text: answer }] }
+  ]);
+  return answer;
 }
 
 async function askGemini(env, history, text) {
@@ -255,6 +437,40 @@ async function telegramRequest(env, method, body) {
   return data;
 }
 
+async function whatsappRequest(env, body) {
+  const version = env.META_GRAPH_API_VERSION || "v23.0";
+  const response = await fetch(
+    `${META_GRAPH_API}/${version}/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`,
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body)
+    }
+  );
+  const data = await response.json();
+  if (!response.ok) throw new Error(`WhatsApp ${response.status}: ${JSON.stringify(data)}`);
+  return data;
+}
+
+function sendWhatsAppMessage(env, to, text) {
+  return whatsappRequest(env, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to,
+    type: "text",
+    text: { preview_url: false, body: text }
+  });
+}
+
+async function sendLongWhatsAppMessage(env, to, text) {
+  for (const chunk of splitText(text, 4000)) {
+    await sendWhatsAppMessage(env, to, chunk);
+  }
+}
+
 function sendTelegramMessage(env, chatId, text) {
   return telegramRequest(env, "sendMessage", {
     chat_id: chatId,
@@ -286,4 +502,4 @@ function splitText(text, maxLength) {
   return chunks;
 }
 
-export { splitText };
+export { extractWhatsAppMessages, isValidMetaSignature, splitText };
