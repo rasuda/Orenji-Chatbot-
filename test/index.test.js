@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractWhatsAppMessages, isValidMetaSignature, splitText } from "../src/index.js";
+import {
+  buildSystemInstruction,
+  extractWhatsAppMessages,
+  isValidMetaSignature,
+  splitText
+} from "../src/index.js";
 
 test("mantém mensagens curtas em um único bloco", () => {
   assert.deepEqual(splitText("Olá, mundo", 20), ["Olá, mundo"]);
@@ -50,4 +55,16 @@ test("valida a assinatura HMAC enviada pela Meta", async () => {
 
   assert.equal(await isValidMetaSignature(body, headers, secret), true);
   assert.equal(await isValidMetaSignature(`${body}alterado`, headers, secret), false);
+});
+
+test("orienta o Gemini a atender com a base institucional da Orenji", () => {
+  const instruction = buildSystemInstruction("quarta-feira, 2 de setembro de 2026 às 09:00");
+
+  assert.match(instruction, /assistente virtual de atendimento/);
+  assert.match(instruction, /Analytics & BI/);
+  assert.match(instruction, /Inteligência Artificial/);
+  assert.match(instruction, /Automação/);
+  assert.match(instruction, /Plataformas de dados/);
+  assert.match(instruction, /Não invente clientes/);
+  assert.match(instruction, /orenjidatascience@gmail\.com/);
 });
