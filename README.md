@@ -6,6 +6,7 @@ Chatbot para Telegram e WhatsApp com respostas geradas pelo Gemini e backend ser
 
 - Respostas do Gemini no Telegram
 - Respostas do Gemini no WhatsApp Cloud API
+- Atendimento institucional baseado nas soluções e competências da Orenji
 - Comandos `/start`, `/ajuda` e `/limpar`
 - Indicador de digitação
 - Divisão automática de respostas longas
@@ -13,6 +14,15 @@ Chatbot para Telegram e WhatsApp com respostas geradas pelo Gemini e backend ser
 - Validação da assinatura HMAC dos webhooks da Meta
 - Histórico opcional por usuário usando Cloudflare KV
 - Endpoints de diagnóstico em `/` e `/status`
+
+## Atendimento institucional
+
+O Gemini recebe uma base institucional incorporada ao Worker a partir das informações oficiais publicadas em:
+
+- https://rasuda.github.io/Orenji-site/
+- https://www.linkedin.com/company/orenji-data-science/
+
+O bot atua como assistente virtual consultivo, explica as soluções de Analytics & BI, Inteligência Artificial, Automação e Plataformas de Dados e encaminha oportunidades para os canais oficiais. Ele também é orientado a não inventar preços, prazos, clientes, cases ou competências não publicadas.
 
 ## Pré-requisitos
 
